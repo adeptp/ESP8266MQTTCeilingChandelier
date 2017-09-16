@@ -23,8 +23,9 @@ const char *host = MYHOSTNAME;
 int led_pin1 = 12;
 int led_pin2 = 13;
 int led_pin3 = 15;
+#define RC_PIN 4
 
-int sw_pin = 4;
+//int sw_pin = 4;
 
 bool LampSwitch = true;
 
@@ -164,7 +165,7 @@ void SendParamRC(unsigned long code)
 		{
 			if ((--MaxLamp) < 1)
 				MaxLamp = 3;
-			chkMillisLamp = 10;
+			chkMillisLamp = 500;
 		}
 	}
 
@@ -384,7 +385,7 @@ void setup()
 	}
 	ESP.wdtEnable(WDTO_4S);
 
-	mySwitch.enableReceive(4);
+	mySwitch.enableReceive(RC_PIN);
 }
 
 void loop()
