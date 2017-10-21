@@ -4,7 +4,16 @@
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
 #include <RCSwitch.h>
+#include "RemoteDebug.h"
 #include "privatefile.h" // Remove this line by commenting on it
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+// Data wire is plugged into port 2 on the Arduino
+#define ONE_WIRE_BUS 14
+
+// arrays to hold device address
+DeviceAddress insideThermometer;
 
 // Expose Espressif SDK functionality - wrapped in ifdef so that it still
 // compiles on other platforms
@@ -14,7 +23,7 @@ extern "C" {
 }
 #endif
 
-#define MYHOSTNAME "RoomSLight1"
+#define MYHOSTNAME "RoomSLight"
 
 const char *ssid = SSID;			 //Put  yuor ssid here
 const char *password = SSIDPASSWORD; //Put  yuor ssid password here
@@ -46,7 +55,15 @@ unsigned long chkMillisLamp = 3000;
 
 unsigned int MaxLamp = 3;
 
+RemoteDebug Debug;
+
 RCSwitch mySwitch = RCSwitch();
+
+// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(ONE_WIRE_BUS);
+
+// Pass our oneWire reference to Dallas Temperature.
+DallasTemperature sensors;
 
 void SetLampSwitch(bool sw)
 {
@@ -61,27 +78,71 @@ void SetLampSwitch(bool sw)
 	}
 }
 
+// function to print a device address
+void printAddress(DeviceAddress deviceAddress)
+{
+	for (uint8_t i = 0; i < 8; i++)
+	{
+		if (deviceAddress[i] < 16)
+			Debug.print("0");
+		Debug.print(deviceAddress[i], HEX);
+	}
+}
+
+void processCmdRemoteDebug()
+{
+	String lastCmd = Debug.getLastCommand();
+	lastCmd.toLowerCase();
+
+	if (lastCmd == "gi")
+	{
+		Debug.isActive(Debug.VERBOSE);
+		Debug.println("Get info:");
+
+		if (!sensors.getAddress(insideThermometer, 0))
+			Debug.println("Unable to find address for Device 0");
+		Debug.print("Device 0 Address: ");
+		printAddress(insideThermometer);
+		Debug.println();
+
+		// set the resolution to 9 bit (Each Dallas/Maxim device is capable of several different resolutions)
+		//sensors.setResolution(insideThermometer, 9);
+
+		Debug.print("Device 0 Resolution: ");
+		Debug.print(sensors.getResolution(insideThermometer), DEC);
+		Debug.println();
+
+		sensors.requestTemperatures();
+		float tempC = sensors.getTempC(insideThermometer);
+		Debug.print("Temp C: ");
+		Debug.println(tempC);
+	}
+}
+
 ///mqtt callback
 void callback(char *topic, byte *payload, unsigned int length)
 {
-
-	Serial.println("");
-	Serial.println("-------");
-	Serial.println("New callback of MQTT-broker");
-	Serial.setDebugOutput(true);
+	if (Debug.isActive(Debug.DEBUG))
+	{
+		Debug.println("");
+		Debug.println("-------");
+		Debug.println("New callback of MQTT-broker");
+	}
 
 	//преобразуем тему(topic) и значение (payload) в строку
 	payload[length] = '\0';
 	String strTopic = String(topic);
 	String strPayload = String((char *)payload);
-	Serial.printf("strTopic %s ~ strPayload %s \n", topic, payload);
+	if (Debug.isActive(Debug.DEBUG))
+		Debug.printf("strTopic %s ~ strPayload %s \n", topic, payload);
 
 	if (!strTopic.startsWith(MYHOSTNAME))
 		return;
 
 	if (strTopic.endsWith("/switch"))
 	{
-		Serial.printf("switch topic!\n");
+		if (Debug.isActive(Debug.DEBUG))
+			Debug.printf("switch topic!\n");
 		SetLampSwitch(strPayload.equalsIgnoreCase("true"));
 	}
 
@@ -91,7 +152,8 @@ void callback(char *topic, byte *payload, unsigned int length)
 		MaxLamp = strPayload.toInt();
 		if ((MaxLamp < 1) || (MaxLamp > 3))
 			MaxLamp = 3;
-		Serial.printf("switch topic MaxLamp! %d \n", MaxLamp);
+		if (Debug.isActive(Debug.DEBUG))
+			Debug.printf("switch topic MaxLamp! %d \n", MaxLamp);
 		chkMillisLamp = 500;
 	}
 
@@ -101,7 +163,8 @@ void callback(char *topic, byte *payload, unsigned int length)
 
 void SendParam()
 {
-	Serial.println("SendParam");
+	if (Debug.isActive(Debug.DEBUG))
+		Debug.println("SendParam");
 
 	snprintf(msg, msg_size, "%ld", ESP.getFreeHeap());
 	snprintf(topic, msg_size, "%s/freemem", host);
@@ -144,6 +207,13 @@ void SendParam1()
 	snprintf(topic, msg_size, "%s/uptime", host);
 	snprintf(msg, msg_size, "%ld", millis());
 	client.publish(topic, msg, true);
+
+	sensors.requestTemperatures();
+	float tempC = sensors.getTempC(insideThermometer);
+
+	snprintf(topic, msg_size, "%s/temperature", host);
+	dtostrf(tempC, 5, 4, msg);
+	client.publish(topic, msg, true);
 }
 
 void SendParamRC(unsigned long code)
@@ -179,12 +249,13 @@ void SendParamRC(unsigned long code)
 
 void LampCheck()
 {
-	//Serial.printf("Lamp check %ld %ld\n", millis(), chkMillisLamp);
+	//if (Debug.isActive(Debug.DEBUG)) Debug.printf("Lamp check %ld %ld\n", millis(), chkMillisLamp);
 
 	bool l = digitalRead(led_pin1);
 	if (LampSwitch != l)
 	{
-		Serial.println("lamp led_pin1 sw");
+		if (Debug.isActive(Debug.DEBUG))
+			Debug.println("lamp led_pin1 sw");
 		digitalWrite(led_pin1, LampSwitch ? HIGH : LOW);
 		return;
 	}
@@ -194,7 +265,8 @@ void LampCheck()
 	{
 		if (LampSwitch != l)
 		{
-			Serial.println("lamp led_pin2 sw");
+			if (Debug.isActive(Debug.DEBUG))
+				Debug.println("lamp led_pin2 sw");
 			digitalWrite(led_pin2, LampSwitch ? HIGH : LOW);
 			return;
 		}
@@ -213,7 +285,8 @@ void LampCheck()
 	{
 		if (LampSwitch != l)
 		{
-			Serial.println("lamp led_pin3 sw");
+			if (Debug.isActive(Debug.DEBUG))
+				Debug.println("lamp led_pin3 sw");
 			digitalWrite(led_pin3, LampSwitch ? HIGH : LOW);
 			return;
 		}
@@ -250,7 +323,8 @@ void mySwitchLoop()
 			if ((l % 1000) > 910)
 			{
 				unsigned long sendcode = lastcode * 10 + 1;
-				Serial.printf("Send long comand %d %d %d\r\n", lastcode, l % 1000, sendcode);
+				if (Debug.isActive(Debug.DEBUG))
+					Debug.printf("Send long comand %d %d %d\r\n", lastcode, l % 1000, sendcode);
 				SendParamRC(sendcode);
 				firstav = lastav;
 				sendlongcode = true;
@@ -268,12 +342,13 @@ void mySwitchLoop()
 		if (lastcode != 0)
 		{
 			unsigned long l = (millis() - lastav);
-			if ((l > 75) && (l < 900))
+			if ((l > 100) && (l < 900))
 			{
 				if (!sendlongcode)
 				{
 					unsigned long sendcode = lastcode * 10;
-					Serial.printf("Send short comand %d %d %d\r\n", lastcode, l, sendcode);
+					if (Debug.isActive(Debug.DEBUG))
+						Debug.printf("Send short comand %d %d %d\r\n", lastcode, l, sendcode);
 					SendParamRC(sendcode);
 				}
 
@@ -313,6 +388,14 @@ void setup()
 		ESP.restart();
 	}
 
+	Debug.begin(MYHOSTNAME); // Initiaze the telnet server - HOST_NAME is the used in MDNS.begin
+
+	Debug.setResetCmdEnabled(true); // Enable the reset command
+	Debug.setCallBackProjectCmds(&processCmdRemoteDebug);
+
+	//Debug.showTime(true); // To show time
+	// Debug.showProfiler(true); // To show profiler - time between messages of Debug
+
 	// Port defaults to 8266
 	// ArduinoOTA.setPort(8266);
 
@@ -327,7 +410,7 @@ void setup()
 
 	ArduinoOTA.onStart([]() {
 		ESP.wdtDisable();
-		Serial.println("Start");
+		Serial.println("Start OTA");
 
 		digitalWrite(led_pin1, HIGH);
 		digitalWrite(led_pin2, HIGH);
@@ -386,6 +469,12 @@ void setup()
 	ESP.wdtEnable(WDTO_4S);
 
 	mySwitch.enableReceive(RC_PIN);
+
+	oneWire = OneWire(ONE_WIRE_BUS);
+	sensors = DallasTemperature(&oneWire);
+
+	if (!sensors.getAddress(insideThermometer, 0))
+		Serial.println("Unable to find address for Device 0");
 }
 
 void loop()
@@ -464,5 +553,6 @@ void loop()
 	}
 
 	client.loop();
+	Debug.handle();
 	mySwitchLoop();
 }
