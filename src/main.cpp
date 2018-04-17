@@ -8,6 +8,8 @@
 #include "privatefile.h" // Remove this line by commenting on it
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <ESP8266WebServer.h>
+
 
 // Data wire is plugged into port 2 on the Arduino
 #define ONE_WIRE_BUS 14
@@ -64,6 +66,11 @@ OneWire oneWire(ONE_WIRE_BUS);
 
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors;
+
+
+ESP8266WebServer server(80);
+
+
 
 void SetLampSwitch(bool sw)
 {
@@ -360,6 +367,43 @@ void mySwitchLoop()
 	}
 }
 
+
+
+void handleRoot() {
+   server.send(200, "text/plain", "hello from esp8266!");
+ }
+
+
+void handleSensors() {
+	char message[200];
+
+	float tempC = sensors.getTempC(insideThermometer);
+
+    dtostrf(tempC, 5, 2, msg);
+
+	snprintf(message, 200, "hostname:%s;dsw1:%s;gpio13:%d", host, msg, LampSwitch);
+
+	server.send(200, "text/plain", message);
+}
+
+
+void handleNotFound(){
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET)?"GET":"POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i=0; i<server.args(); i++){
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  server.send(404, "text/plain", message);
+}
+
+
+
 void setup()
 {
 	Serial.begin(115200);
@@ -475,11 +519,26 @@ void setup()
 
 	if (!sensors.getAddress(insideThermometer, 0))
 		Serial.println("Unable to find address for Device 0");
+
+
+		server.on("/", handleRoot);
+		server.on("/sensors", handleSensors);
+
+	    server.on("/inline", [](){
+	      server.send(200, "text/plain", "this works as well");
+	    });
+
+	    server.onNotFound(handleNotFound);
+
+	    server.begin();
+
 }
 
 void loop()
 {
 	ArduinoOTA.handle();
+	server.handleClient();
+
 	//digitalRead(sw_pin);
 	ESP.wdtFeed();
 
